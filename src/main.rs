@@ -27,7 +27,6 @@ struct TokenResponse {
     access_token: String,
 }
 
-// Mỗi job = (đường dẫn file full, id folder cha trên Drive)
 type Job = (PathBuf, String);
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -39,19 +38,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let local_root = dirs::document_dir().ok_or("Could not find Documents folder")?;
 
-    // HTTP client + access token chia sẻ giữa các thread
     let client = Arc::new(Client::new());
     let token = Arc::new(Mutex::new(get_token(&client, &oauth)?));
 
-    // 1. Tạo folder gốc ImportantFiles
     let drive_root_id =
         create_drive_folder(&client, &oauth, &token, DRIVE_ROOT_NAME, None)?;
 
-    // 2. Tạo channel cho job upload file
     let (tx, rx) = channel::<Job>();
     let rx = Arc::new(Mutex::new(rx));
 
-    // 3. Spawn worker threads
     for _ in 0..MAX_THREADS {
         let rx = Arc::clone(&rx);
         let client = Arc::clone(&client);
@@ -59,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let token = Arc::clone(&token);
 
         thread::spawn(move || loop {
-            // Lấy job từ channel (blocking)
+
             let msg = {
                 let guard = rx.lock().unwrap();
                 guard.recv()
@@ -67,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let (file_path, parent_id) = match msg {
                 Ok(job) => job,
-                Err(_) => break, // channel đóng, thoát thread
+                Err(_) => break, 
             };
 
             if let Err(e) = upload_file(&client, &oauth, &token, &parent_id, &file_path) {
@@ -76,7 +71,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         });
     }
 
-    // 4. Đệ quy duyệt thư mục, tạo folder trên Drive và đẩy file vào queue
     upload_folder_recursive(
         &client,
         &oauth,
@@ -86,16 +80,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         &tx,
     )?;
 
-    // 5. Đóng đầu gửi để worker biết là hết việc
     drop(tx);
 
-    // đợi cho thread upload xong (thô sơ nhưng đủ dùng)
     thread::sleep(std::time::Duration::from_secs(5));
 
     Ok(())
 }
 
-/// Lấy access token từ refresh token
 fn get_token(client: &Client, oauth: &OAuthConfig) -> Result<String, Box<dyn Error>> {
     let resp = client
         .post("https://oauth2.googleapis.com/token")
@@ -120,7 +111,6 @@ fn get_token(client: &Client, oauth: &OAuthConfig) -> Result<String, Box<dyn Err
     Ok(tok.access_token)
 }
 
-/// Tạo folder trên Drive, trả về id
 fn create_drive_folder(
     client: &Client,
     oauth: &OAuthConfig,
@@ -160,7 +150,6 @@ fn create_drive_folder(
     Ok(id)
 }
 
-/// Đệ quy: tạo folder con trên Drive + gửi file vào hàng đợi
 fn upload_folder_recursive(
     client: &Client,
     oauth: &OAuthConfig,
@@ -186,14 +175,13 @@ fn upload_folder_recursive(
             let drive_id =
                 create_drive_folder(client, oauth, access_token, name, Some(drive_parent_id))?;
 
-            // đệ quy folder con
             if let Err(e) =
                 upload_folder_recursive(client, oauth, access_token, &path, &drive_id, tx)
             {
                 eprintln!("Failed to walk folder {}: {}", path.display(), e);
             }
         } else {
-            // file: kiểm tra size + push job
+
             let meta = match fs::metadata(&path) {
                 Ok(m) => m,
                 Err(e) => {
@@ -207,7 +195,6 @@ fn upload_folder_recursive(
                 continue;
             }
 
-            // Gửi job: (full_path, drive_parent_id)
             if let Err(e) = tx.send((path.clone(), drive_parent_id.to_string())) {
                 eprintln!("Failed to enqueue job for {}: {}", path.display(), e);
             }
@@ -217,7 +204,6 @@ fn upload_folder_recursive(
     Ok(())
 }
 
-/// Upload 1 file vào folder Drive parent_id
 fn upload_file(
     client: &Client,
     oauth: &OAuthConfig,
@@ -241,7 +227,7 @@ fn upload_file(
     let file_part = match multipart::Part::file(file_path) {
         Ok(p) => p.mime_str("application/octet-stream")?,
         Err(e) => {
-            // iCloud file chưa tải, file vừa bị xóa, v.v.
+
             return Err(format!("cannot open file: {}", e).into());
         }
     };
